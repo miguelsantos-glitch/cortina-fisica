@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Cortina Física Interativa</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<style>
+:root {
+    --bg: #05060a;
+    --panel: rgba(20,25,40,.85);
+    --accent: #9bbcff;
+    --text: #e6e9ff;
+}
+* { box-sizing: border-box; }
+html, body {
+    margin: 0; padding: 0;
+    background: radial-gradient(#10131a, var(--bg));
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    overflow: hidden;
+    touch-action: none;
+}
+header {
+    position: fixed; top: 0; width: 100%;
+    padding: 12px 16px;
+    background: linear-gradient(to bottom, rgba(5,6,10,.9), transparent);
+    z-index: 10;
+}
+header h1 { margin: 0; font-size: 1.1rem; }
+header span { font-size: .75rem; opacity: .7; }
+footer {
+    position: fixed; bottom: 0; width: 100%;
+    padding: 10px; font-size: .7rem; text-align: center;
+    opacity: .6;
+    background: linear-gradient(to top, rgba(5,6,10,.9), transparent);
+}
+.panel {
+    position: fixed; right: 10px; top: 70px;
+    background: var(--panel); padding: 12px;
+    border-radius: 12px; width: 170px;
+    font-size: .75rem; z-index: 10;
+    backdrop-filter: blur(6px);
+}
+.panel label { display: block; margin-top: 10px; }
+.panel input { width: 100%; }
+.panel button {
+    width: 100%; margin-top: 10px; padding: 6px;
+    background: var(--accent); border: none;
+    border-radius: 6px; color: #000; font-weight: bold;
+}
+canvas { position: fixed; inset: 0; }
+</style>
+</head>
+<body>
+
+<header>
+    <h1>Cortina Física Interativa</h1>
+    <span>Arraste para interagir • Arraste rápido para rasgar</span>
+</header>
+
+<div class="panel">
+    <label>🌍 Gravidade
+        <input type="range" id="gravity" min="0.1" max="1" step="0.05" value="0.55">
+    </label>
+    <label>🌬️ Vento
+        <input type="range" id="wind" min="0" max="0.3" step="0.01" value="0.12">
+    </label>
+    <button id="reset">Resetar tecido</button>
+</div>
+
+<footer>
+    Simulação massa–mola • Mobile & Desktop
+</footer>
+
+<canvas id="c"></canvas>
+
+<script>
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+function resize(){ canvas.width=innerWidth; canvas.height=innerHeight; }
+resize(); addEventListener("resize", resize);
+
+let GRAVITY=0.55, WIND_BASE=0.12;
+gravity.oninput=e=>GRAVITY=+e.target.value;
+wind.oninput=e=>WIND_BASE=+e.target.value;
+
+const SPACING=12, FRICTION=0.998, TEAR_DISTANCE=65, ITER=6;
+
+class Point{
+  constructor(x,y,p=false){this.x=x;this.y=y;this.ox=x;this.oy=y;this.p=p;this.l=[]}
+  u(){ if(this.p) return;
+    let vx=(this.x-this.ox)*FRICTION, vy=(this.y-this.oy)*FRICTION;
+    this.ox=this.x; this.oy=this.y;
+    this.x+=vx; this.y+=vy+GRAVITY;
+  }
+  f(x,y){this.x+=x; this.y+=y;}
+}
+class Link{
+  constructor(a,b){this.a=a;this.b=b;this.l=SPACING;this.bk=false}
+  s(){
+    if(this.bk) return;
+    let dx=this.b.x-this.a.x, dy=this.b.y-this.a.y;
+    let d=Math.hypot(dx,dy);
+    if(d>TEAR_DISTANCE){this.bk=true;return;}
+    let diff=(this.l-d)/d*.5, ox=dx*diff, oy=dy*diff;
+    if(!this.a.p){this.a.x-=ox;this.a.y-=oy;}
+    if(!this.b.p){this.b.x+=ox;this.b.y+=oy;}
+  }
+}
+
+let pts=[], lks=[];
+function make(){
+  pts=[]; lks=[];
+  let c=Math.floor(canvas.width/SPACING)-2;
+  let r=Math.floor(canvas.height/SPACING*.75);
+  for(let y=0;y<r;y++)for(let x=0;x<c;x++){
+    let p=new Point(x*SPACING+SPACING,y*SPACING+30,y===0);
+    pts.push(p);
+    if(x>0){let l=new Link(p,pts[pts.length-2]);p.l.push(l);lks.push(l);}
+    if(y>0){let l=new Link(p,pts[(y-1)*c+x]);p.l.push(l);lks.push(l);}
+  }
+}
+make(); reset.onclick=make;
+
+const I={x:0,y:0,px:0,py:0,d:false};
+const mv=(x,y)=>{I.px=I.x;I.py=I.y;I.x=x;I.y=y;};
+canvas.onmousedown=e=>{I.d=true;mv(e.clientX,e.clientY)};
+canvas.onmousemove=e=>I.d&&mv(e.clientX,e.clientY);
+canvas.onmouseup=()=>I.d=false;
+canvas.ontouchstart=e=>{I.d=true;mv(e.touches[0].clientX,e.touches[0].clientY)};
+canvas.ontouchmove=e=>mv(e.touches[0].clientX,e.touches[0].clientY);
+canvas.ontouchend=()=>I.d=false;
+
+let t=0;
+function loop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  t+=.01; let w=Math.sin(t)*WIND_BASE;
+  for(let i=0;i<ITER;i++) lks.forEach(l=>l.s());
+  pts.forEach(p=>{
+    p.u(); p.f(w*(p.y/canvas.height)*4,0);
+    if(I.d){
+      let dx=p.x-I.x, dy=p.y-I.y, d=Math.hypot(dx,dy);
+      let sp=Math.abs(I.x-I.px)+Math.abs(I.y-I.py);
+      if(d<35){p.f((I.x-I.px)*.6,(I.y-I.py)*.1); if(sp>45)p.l.forEach(l=>l.bk=true);}
+    }
+  });
+  ctx.beginPath(); ctx.strokeStyle="#9bbcff";
+  lks.forEach(l=>{if(!l.bk){ctx.moveTo(l.a.x,l.a.y);ctx.lineTo(l.b.x,l.b.y);}});
+  ctx.stroke();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
